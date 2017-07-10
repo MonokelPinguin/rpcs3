@@ -16,8 +16,8 @@ evdev_joystick_config g_evdev_joystick_config;
 
 namespace
 {
-    const u32 THREAD_SLEEP = 10;
-    const u32 THREAD_SLEEP_INACTIVE = 100;
+    const u32 THREAD_SLEEP_USEC = 100;
+    const u32 THREAD_SLEEP_INACTIVE = 1'000'000;
     const u32 READ_TIMEOUT = 10;
     const u32 THREAD_TIMEOUT = 1000;
 
@@ -55,8 +55,8 @@ void evdev_joystick_handler::Init(const u32 max_connect)
     for (u32 i = 0; i < m_info.max_connect; ++i)
     {
         joy_devs.push_back(nullptr);
-        joy_axis_maps.emplace_back(ABS_RZ - ABS_X, -1);
-        joy_button_maps.emplace_back(KEY_MAX - BTN_JOYSTICK, -1);
+        joy_axis_maps.emplace_back();
+        joy_button_maps.emplace_back();
         joy_hat_ids.emplace_back(-1);
         m_pads.emplace_back(
             CELL_PAD_STATUS_DISCONNECTED,
@@ -80,10 +80,10 @@ void evdev_joystick_handler::Init(const u32 max_connect)
         pad.m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, g_evdev_joystick_config.r3, CELL_PAD_CTRL_R3);
         pad.m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL2, 0, 0x100/*CELL_PAD_CTRL_PS*/);// TODO: PS button support
 
-        pad.m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, DPAD_AXIS_Y, CELL_PAD_CTRL_UP);
-        pad.m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, DPAD_AXIS_Y, CELL_PAD_CTRL_DOWN);
-        pad.m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, DPAD_AXIS_X, CELL_PAD_CTRL_LEFT);
-        pad.m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, DPAD_AXIS_X, CELL_PAD_CTRL_RIGHT);
+        pad.m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, g_evdev_joystick_config.up, CELL_PAD_CTRL_UP);
+        pad.m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, g_evdev_joystick_config.down, CELL_PAD_CTRL_DOWN);
+        pad.m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, g_evdev_joystick_config.left, CELL_PAD_CTRL_LEFT);
+        pad.m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, g_evdev_joystick_config.right, CELL_PAD_CTRL_RIGHT);
 
         pad.m_sticks.emplace_back(CELL_PAD_BTN_OFFSET_ANALOG_RIGHT_X+g_evdev_joystick_config.lxstick, 0, 0);
         pad.m_sticks.emplace_back(CELL_PAD_BTN_OFFSET_ANALOG_RIGHT_X+g_evdev_joystick_config.lystick, 0, 0);
@@ -161,7 +161,7 @@ bool evdev_joystick_handler::try_open_dev(u32 index)
         if (libevdev_has_event_code(dev, EV_KEY, i))
         {
             LOG_NOTICE(GENERAL, "Joystick #%d has button %d as %d", index, i, buttons);
-            joy_button_maps[index][i - BTN_MISC] = buttons++;
+            joy_button_maps[index][i] = buttons++;
         }
 
     int axes=0;
@@ -169,7 +169,7 @@ bool evdev_joystick_handler::try_open_dev(u32 index)
         if (libevdev_has_event_code(dev, EV_ABS, i))
         {
             LOG_NOTICE(GENERAL, "Joystick #%d has axis %d as %d", index, i, axes);
-            joy_axis_maps[index][i - ABS_X] = axes++;
+            joy_axis_maps[index][i] = axes++;
         }
 
     for (int i=ABS_HAT0X; i<=ABS_HAT3Y; i+=2)
@@ -254,15 +254,15 @@ void evdev_joystick_handler::thread_func()
                     break;
                 }
 
-                int button_code = joy_button_maps[i][evt.code - BTN_MISC];
-                if (button_code == -1)
+                auto button_code = joy_button_maps[i].find(evt.code);
+                if (button_code == joy_button_maps[i].end())
                 {
                     LOG_ERROR(GENERAL, "Joystick #%d sent invalid button code %d", i, evt.code);
                 }
-
+		int bc = button_code->second;
                 auto which_button = std::find_if(
                     pad.m_buttons.begin(), pad.m_buttons.end(),
-                    [&](const Button& bt) { return bt.m_keyCode == button_code; });
+                    [bc](const Button& bt) { return bt.m_keyCode == bc; });
                 if (which_button == pad.m_buttons.end())
                 {
                     LOG_ERROR(GENERAL, "Joystick #%d sent button event for invalid button %d", i, evt.code);
@@ -317,15 +317,15 @@ void evdev_joystick_handler::thread_func()
                 }
                 else if (evt.code <= ABS_RZ)
                 {
-                    int axis = joy_axis_maps[i][evt.code - ABS_X];
+			auto axis = joy_axis_maps[i].find(evt.code);
 
-                    if (axis > pad.m_sticks.size())
+                    if (axis == joy_axis_maps[i].end() || axis->second > pad.m_sticks.size())
                     {
-                        LOG_ERROR(GENERAL, "Joystick #%d sent axis event for invalid axis %d", i, axis);
+                        LOG_ERROR(GENERAL, "Joystick #%d sent axis event for invalid axis %d", i, axis->second);
                         break;
                     }
 
-                    auto& stick = pad.m_sticks[axis];
+                    auto& stick = pad.m_sticks[(int)axis->second];
                     stick.m_value = evt.value;
                 }
                 break;
@@ -335,8 +335,8 @@ void evdev_joystick_handler::thread_func()
             }
         }
 
-        int to_sleep = m_info.now_connect > 0 ? THREAD_SLEEP : THREAD_SLEEP_INACTIVE;
-        usleep(milli2micro(to_sleep));
+        int to_sleep = m_info.now_connect > 0 ? THREAD_SLEEP_USEC : THREAD_SLEEP_INACTIVE;
+        usleep(to_sleep);
     }
 
     dead = true;

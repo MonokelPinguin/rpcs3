@@ -6,6 +6,7 @@
 #include "Emu/Io/PadHandler.h"
 #include <libevdev/libevdev.h>
 #include <vector>
+#include <unordered_map>
 #include <thread>
 
 struct evdev_joystick_config final : cfg::node
@@ -14,10 +15,17 @@ struct evdev_joystick_config final : cfg::node
 
     cfg::int32 select{this, "Select", 8};
     cfg::int32 start{this, "Start", 9};
+    cfg::int32 ps{this, "PS", 20};
+
     cfg::int32 triangle{this, "Triangle", 0};
     cfg::int32 circle{this, "Circle", 1};
     cfg::int32 cross{this, "Cross", 2};
     cfg::int32 square{this, "Square", 3};
+
+    cfg::int32 up{this, "Up", 12};
+    cfg::int32 right{this, "Right", 13};
+    cfg::int32 down{this, "Down", 14};
+    cfg::int32 left{this, "Left", 15};
 
     cfg::int32 r1{this, "R1", 7};
     cfg::int32 r2{this, "R2", 5};
@@ -66,7 +74,7 @@ private:
     mutable atomic_t<bool> active{false}, dead{false};
     std::vector<std::string> joy_paths;
     std::vector<libevdev*> joy_devs;
-    std::vector<std::vector<int>> joy_button_maps;
-    std::vector<std::vector<int>> joy_axis_maps;
+    std::vector<std::unordered_map<int,int>> joy_button_maps;
+    std::vector<std::unordered_map<int,int>> joy_axis_maps;
     std::vector<int> joy_hat_ids;
 };
