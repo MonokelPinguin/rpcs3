@@ -8,6 +8,8 @@
 typedef unsigned __int32  uint32_t;
 #else 
 #include <stdint.h> 
+#include <unistd.h>
+#include <cmath>
 #endif 
 
 class System_Info
@@ -66,14 +68,22 @@ public:
 		bool supports_ssse3 = cpu_capabilities[9];
 
 		std::string s_sysInfo = fmt::format("%s | SSSE3 %s", std::regex_replace(brand, std::regex("^ +"), ""), supports_ssse3 ? "Supported" : "Not Supported");
+                
+                long numProcessors = 0;
+                long totalPhysMem = 0;
 #ifdef _WIN32
 		SYSTEM_INFO sysInfo;
 		GetNativeSystemInfo(&sysInfo);
 		MEMORYSTATUSEX memInfo;
 		memInfo.dwLength = sizeof(memInfo);
 		GlobalMemoryStatusEx(&memInfo);
-		s_sysInfo += fmt::format(" | %d Threads | %.2f GB RAM", sysInfo.dwNumberOfProcessors, (float)memInfo.ullTotalPhys / std::pow(1024.0f, 3));
+                numProcessors = sysInfo.dwNumberOfProcessors;
+                totalPhysMem = memInfo.ullTotalPhys;
+#else
+                numProcessors = sysconf(_SC_NPROCESSORS_ONLN);
+                totalPhysMem = sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGE_SIZE);
 #endif
+		s_sysInfo += fmt::format(" | %d Threads | %.2f GB RAM", numProcessors, (float)totalPhysMem / std::pow(1024.0f, 3));
 
 		return std::pair<std::string, bool>(s_sysInfo, supports_ssse3);
 	};
